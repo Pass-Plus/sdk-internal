@@ -108,6 +108,7 @@ pub struct EncryptionContext {
 pub struct Cipher {
     pub id: Option<CipherId>,
     pub organization_id: Option<OrganizationId>,
+    pub device_bound: bool,
     pub folder_id: Option<FolderId>,
     pub collection_ids: Vec<CollectionId>,
 
@@ -153,6 +154,7 @@ bitwarden_state::register_repository_item!(Cipher, "Cipher");
 pub struct CipherView {
     pub id: Option<CipherId>,
     pub organization_id: Option<OrganizationId>,
+    pub device_bound: bool,
     pub folder_id: Option<FolderId>,
     pub collection_ids: Vec<CollectionId>,
 
@@ -310,6 +312,7 @@ impl CompositeEncryptable<KeyIds, SymmetricKeyId, Cipher> for CipherView {
         Ok(Cipher {
             id: cipher_view.id,
             organization_id: cipher_view.organization_id,
+            device_bound: cipher_view.device_bound,
             folder_id: cipher_view.folder_id,
             collection_ids: cipher_view.collection_ids,
             key: cipher_view.key,
@@ -356,6 +359,7 @@ impl Decryptable<KeyIds, SymmetricKeyId, CipherView> for Cipher {
         let mut cipher = CipherView {
             id: self.id,
             organization_id: self.organization_id,
+            device_bound: self.device_bound,
             folder_id: self.folder_id,
             collection_ids: self.collection_ids.clone(),
             key: self.key.clone(),
@@ -706,9 +710,10 @@ impl IdentifyKey<SymmetricKeyId> for Cipher {
 
 impl IdentifyKey<SymmetricKeyId> for CipherView {
     fn key_identifier(&self) -> SymmetricKeyId {
-        match self.organization_id {
-            Some(organization_id) => SymmetricKeyId::Organization(organization_id),
-            None => SymmetricKeyId::User,
+        match (self.organization_id, self.device_bound) {
+            (Some(organization_id), _) => SymmetricKeyId::Organization(organization_id),
+            (_, true) => SymmetricKeyId::Local("device_key"),
+            _ => SymmetricKeyId::User,
         }
     }
 }
@@ -771,6 +776,8 @@ impl TryFrom<CipherDetailsResponseModel> for Cipher {
             revision_date: require!(cipher.revision_date).parse()?,
             key: EncString::try_from_optional(cipher.key)?,
             archived_date: cipher.archived_date.map(|d| d.parse()).transpose()?,
+            // TODO(II): need to forward this to other models
+            device_bound: false,
         })
     }
 }
@@ -823,6 +830,7 @@ mod tests {
             }),
             id: Some(test_id),
             organization_id: None,
+            device_bound: false,
             folder_id: None,
             collection_ids: vec![],
             key: None,
@@ -912,6 +920,7 @@ mod tests {
             deleted_date: None,
             revision_date: "2024-01-30T17:55:36.150Z".parse().unwrap(),
             archived_date: None,
+            device_bound: false,
         };
 
         let view: CipherListView = key_store.decrypt(&cipher).unwrap();

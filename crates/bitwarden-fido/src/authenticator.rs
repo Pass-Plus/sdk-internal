@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
-use bitwarden_core::Client;
-use bitwarden_crypto::CryptoError;
+use bitwarden_core::{Client, key_management::SymmetricKeyId};
+use bitwarden_crypto::{CompositeEncryptable, CryptoError, SymmetricCryptoKey};
 use bitwarden_vault::{CipherError, CipherView, EncryptionContext};
 use itertools::Itertools;
 use log::error;
@@ -107,6 +107,7 @@ pub struct Fido2Authenticator<'a> {
     pub client: &'a Client,
     pub user_interface: &'a dyn Fido2UserInterface,
     pub credential_store: &'a dyn Fido2CredentialStore,
+    pub encryption_key: Option<SymmetricCryptoKey>,
 
     pub(crate) selected_cipher: Mutex<Option<CipherView>>,
     pub(crate) requested_uv: Mutex<Option<UV>>,
@@ -118,11 +119,13 @@ impl<'a> Fido2Authenticator<'a> {
         client: &'a Client,
         user_interface: &'a dyn Fido2UserInterface,
         credential_store: &'a dyn Fido2CredentialStore,
+        encryption_key: Option<SymmetricCryptoKey>,
     ) -> Fido2Authenticator<'a> {
         Fido2Authenticator {
             client,
             user_interface,
             credential_store,
+            encryption_key,
             selected_cipher: Mutex::new(None),
             requested_uv: Mutex::new(None),
         }
@@ -332,7 +335,15 @@ impl<'a> Fido2Authenticator<'a> {
             .clone()
             .ok_or(GetSelectedCredentialError::NoSelectedCredential)?;
 
-        let creds = cipher.decrypt_fido2_credentials(&mut key_store.context())?;
+        let mut ctx = if let Some(encryption_key) = &self.encryption_key {
+            let key = SymmetricKeyId::Local("device_key");
+            let mut ctx = key_store.context();
+            ctx.set_symmetric_key(key, encryption_key.clone())?;
+            ctx
+        } else {
+            key_store.context()
+        };
+        let creds = cipher.decrypt_fido2_credentials(&mut ctx)?;
 
         let credential = creds
             .first()
@@ -400,9 +411,13 @@ impl passkey::authenticator::CredentialStore for CredentialStoreImpl<'_> {
 
             // When using the credential for authentication we have to ask the user to pick one.
             if this.create_credential {
+                let mut ctx = key_store.context();
+                if let Some(device_key) = &this.authenticator.encryption_key {
+                    ctx.set_symmetric_key(SymmetricKeyId::Local("device_key"), device_key.clone())?;
+                }
                 Ok(creds
                     .into_iter()
-                    .map(|c| CipherViewContainer::new(c, &mut key_store.context()))
+                    .map(|c| CipherViewContainer::new(c, &mut ctx))
                     .collect::<Result<_, _>>()?)
             } else {
                 let picked = this
@@ -418,10 +433,11 @@ impl passkey::authenticator::CredentialStore for CredentialStoreImpl<'_> {
                     .expect("Mutex is not poisoned")
                     .replace(picked.clone());
 
-                Ok(vec![CipherViewContainer::new(
-                    picked,
-                    &mut key_store.context(),
-                )?])
+                let mut ctx = key_store.context();
+                if let Some(device_key) = &this.authenticator.encryption_key {
+                    ctx.set_symmetric_key(SymmetricKeyId::Local("device_key"), device_key.clone())?;
+                }
+                Ok(vec![CipherViewContainer::new(picked, &mut ctx)?])
             }
         }
 
@@ -484,7 +500,13 @@ impl passkey::authenticator::CredentialStore for CredentialStoreImpl<'_> {
 
             let key_store = this.authenticator.client.internal.get_key_store();
 
-            selected.set_new_fido2_credentials(&mut key_store.context(), vec![cred])?;
+            {
+                let mut ctx = key_store.context();
+                if let Some(device_key) = &this.authenticator.encryption_key {
+                    ctx.set_symmetric_key(SymmetricKeyId::Local("device_key"), device_key.clone())?;
+                }
+                selected.set_new_fido2_credentials(&mut ctx, vec![cred])?;
+            }
 
             // Store the updated credential for later use
             this.authenticator
@@ -493,13 +515,20 @@ impl passkey::authenticator::CredentialStore for CredentialStoreImpl<'_> {
                 .expect("Mutex is not poisoned")
                 .replace(selected.clone());
 
-            // Encrypt the updated cipher before sending it to the clients to be stored
-            let encrypted = key_store.encrypt(selected)?;
+            let cipher = if let Some(encryption_key) = &this.authenticator.encryption_key {
+                let key = SymmetricKeyId::Local("device_key");
+                let mut ctx = key_store.context();
+                ctx.set_symmetric_key(key, encryption_key.clone())?;
+                selected.encrypt_composite(&mut ctx, key)?
+            } else {
+                // Encrypt the updated cipher before sending it to the clients to be stored
+                key_store.encrypt(selected)?
+            };
 
             this.authenticator
                 .credential_store
                 .save_credential(EncryptionContext {
-                    cipher: encrypted,
+                    cipher,
                     encrypted_for: user_id,
                 })
                 .await?;
@@ -627,13 +656,16 @@ impl passkey::authenticator::UserValidationMethod for UserValidationMethodImpl<'
                 let new_credential = try_from_credential_new_view(user, rp)
                     .map_err(|_| Ctap2Error::InvalidCredential)?;
 
-                let (cipher_view, user_check) = self
+                let (mut cipher_view, user_check) = self
                     .authenticator
                     .user_interface
                     .check_user_and_pick_credential_for_creation(options, new_credential)
                     .await
                     .map_err(|_| Ctap2Error::OperationDenied)?;
 
+                if self.authenticator.encryption_key.is_some() {
+                    cipher_view.device_bound = true;
+                }
                 self.authenticator
                     .selected_cipher
                     .lock()

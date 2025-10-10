@@ -262,6 +262,7 @@ mod tests {
             cipher: Cipher {
                 id: None,
                 organization_id: None,
+                device_bound: false,
                 folder_id: None,
                 collection_ids: Vec::new(),
                 key: Some("2.Gg8yCM4IIgykCZyq0O4+cA==|GJLBtfvSJTDJh/F7X4cJPkzI6ccnzJm5DYl3yxOW2iUn7DgkkmzoOe61sUhC5dgVdV0kFqsZPcQ0yehlN1DDsFIFtrb4x7LwzJNIkMgxNyg=|1rGkGJ8zcM5o5D0aIIwAyLsjMLrPsP3EWm3CctBO3Fw=".parse().unwrap()),
@@ -317,6 +318,7 @@ mod tests {
         let cipher  = Cipher {
             id: None,
             organization_id: None,
+            device_bound: false,
             folder_id: None,
             collection_ids: Vec::new(),
             key: Some("2.Gg8yCM4IIgykCZyq0O4+cA==|GJLBtfvSJTDJh/F7X4cJPkzI6ccnzJm5DYl3yxOW2iUn7DgkkmzoOe61sUhC5dgVdV0kFqsZPcQ0yehlN1DDsFIFtrb4x7LwzJNIkMgxNyg=|1rGkGJ8zcM5o5D0aIIwAyLsjMLrPsP3EWm3CctBO3Fw=".parse().unwrap()),
@@ -376,6 +378,7 @@ mod tests {
         let cipher  = Cipher {
             id: None,
             organization_id: None,
+            device_bound: false,
             folder_id: None,
             collection_ids: Vec::new(),
             key: None,

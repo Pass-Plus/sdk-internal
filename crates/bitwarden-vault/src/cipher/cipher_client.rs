@@ -1,9 +1,7 @@
+use bitwarden_core::{Client, OrganizationId, key_management::SymmetricKeyId};
 #[cfg(feature = "wasm")]
-use bitwarden_core::key_management::SymmetricKeyId;
-use bitwarden_core::{Client, OrganizationId};
-use bitwarden_crypto::IdentifyKey;
-#[cfg(feature = "wasm")]
-use bitwarden_crypto::{CompositeEncryptable, SymmetricCryptoKey};
+use bitwarden_crypto::CompositeEncryptable;
+use bitwarden_crypto::{BitwardenLegacyKeyBytes, IdentifyKey, SymmetricCryptoKey};
 #[cfg(feature = "wasm")]
 use bitwarden_encoding::B64;
 #[cfg(feature = "wasm")]
@@ -135,9 +133,16 @@ impl CiphersClient {
     pub fn decrypt_fido2_credentials(
         &self,
         cipher_view: CipherView,
+        encryption_key: Option<Vec<u8>>,
     ) -> Result<Vec<crate::Fido2CredentialView>, DecryptError> {
         let key_store = self.client.internal.get_key_store();
-        let credentials = cipher_view.decrypt_fido2_credentials(&mut key_store.context())?;
+        let mut ctx = key_store.context();
+        if let Some(key) = encryption_key {
+            let key = SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(key))?;
+            ctx.set_symmetric_key(SymmetricKeyId::Local("device_key"), key)?;
+        }
+
+        let credentials = cipher_view.decrypt_fido2_credentials(&mut ctx)?;
         Ok(credentials)
     }
 
@@ -195,6 +200,7 @@ mod tests {
         Cipher {
             id: Some("358f2b2b-9326-4e5e-94a8-b18100bb0908".parse().unwrap()),
             organization_id: None,
+            device_bound: false,
             folder_id: None,
             collection_ids: vec![],
             key: None,
@@ -246,6 +252,7 @@ mod tests {
             }),
             id: Some(test_id),
             organization_id: None,
+            device_bound: false,
             folder_id: None,
             collection_ids: vec![],
             key: None,
@@ -304,6 +311,7 @@ mod tests {
             .decrypt_list(vec![Cipher {
                 id: Some("a1569f46-0797-4d3f-b859-b181009e2e49".parse().unwrap()),
                 organization_id: Some("1bc9ac1e-f5aa-45f2-94bf-b181009709b8".parse().unwrap()),
+                device_bound: false,
                 folder_id: None,
                 collection_ids: vec!["66c5ca57-0868-4c7e-902f-b181009709c0".parse().unwrap()],
                 key: None,

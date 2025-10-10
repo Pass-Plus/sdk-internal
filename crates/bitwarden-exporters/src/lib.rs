@@ -223,6 +223,7 @@ impl From<ImportingCipher> for CipherView {
 
         Self {
             id: None,
+            device_bound: false,
             organization_id: None,
             folder_id: value.folder_id.map(FolderId::new),
             collection_ids: vec![],
