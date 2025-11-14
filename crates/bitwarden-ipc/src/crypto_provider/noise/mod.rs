@@ -1,3 +1,3 @@
 mod error;
 mod messages;
-mod protocol;
+pub mod protocol;

@@ -1,5 +1,6 @@
 use std::{sync::Arc, vec};
 
+use serde::{Deserialize, Serialize};
 use snow::TransportState;
 use tokio::sync::Mutex;
 
@@ -19,11 +20,11 @@ use crate::{
 const CIPHER_SUITE: &str = "Noise_NN_25519_ChaChaPoly_BLAKE2s";
 
 #[allow(unused)]
-struct NoiseCryptoProvider;
+pub(crate) struct NoiseCryptoProvider;
 #[allow(unused)]
 #[derive(Clone, Debug)]
-struct NoiseCryptoProviderState {
-    state: Arc<Mutex<Option<TransportState>>>,
+pub struct NoiseCryptoProviderState {
+    state: Option<TransportState>,
 }
 
 impl<Com, Ses> CryptoProvider<Com, Ses> for NoiseCryptoProvider
@@ -308,11 +309,11 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::{
+        IpcClient,
         crypto_provider::noise::protocol::NoiseCryptoProvider,
         endpoint::Endpoint,
         message::OutgoingMessage,
-        traits::{tests::TestTwoWayCommunicationBackend, InMemorySessionRepository},
-        IpcClient,
+        traits::{InMemorySessionRepository, tests::TestTwoWayCommunicationBackend},
     };
 
     #[tokio::test]

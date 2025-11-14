@@ -1,1 +1,1 @@
-mod noise;
+pub mod noise;
