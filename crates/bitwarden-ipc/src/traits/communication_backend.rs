@@ -20,7 +20,7 @@ pub trait CommunicationBackend: Send + Sync + 'static {
     fn send(
         &self,
         message: OutgoingMessage,
-    ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send;
+    ) -> impl std::future::Future<Output = Result<(), Self::SendError>> + Send + Sync;
 
     /// Subscribe to receive messages. This function will return a receiver that can be used to
     /// receive messages asynchronously.
@@ -29,7 +29,7 @@ pub trait CommunicationBackend: Send + Sync + 'static {
     ///     - Multiple concurrent receivers may be created.
     ///     - All concurrent receivers will receive the same messages.
     ///      - Multiple concurrent receivers and senders can coexist.
-    fn subscribe(&self) -> impl std::future::Future<Output = Self::Receiver> + Send;
+    fn subscribe(&self) -> impl std::future::Future<Output = Self::Receiver> + Send + Sync;
 }
 
 /// This trait defines the interface for receiving messages from the communication backend.
@@ -50,7 +50,7 @@ pub trait CommunicationBackendReceiver: Send + Sync + 'static {
     /// to create one receiver per thread.
     fn receive(
         &self,
-    ) -> impl std::future::Future<Output = Result<IncomingMessage, Self::ReceiveError>> + Send;
+    ) -> impl std::future::Future<Output = Result<IncomingMessage, Self::ReceiveError>> + Send + Sync;
 }
 
 #[cfg(test)]
@@ -58,8 +58,8 @@ pub mod tests {
     use std::sync::Arc;
 
     use tokio::sync::{
+        Mutex, RwLock,
         broadcast::{self, Receiver, Sender},
-        Mutex, RwLock, RwLock,
     };
 
     use super::*;
