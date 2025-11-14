@@ -18,8 +18,8 @@ pub use content_format::*;
 mod enc_string;
 pub use enc_string::{EncString, UnsignedSharedKey};
 mod error;
-pub use error::CryptoError;
 pub(crate) use error::Result;
+pub use error::{CryptoError, EncodingError};
 mod fingerprint;
 pub use fingerprint::fingerprint;
 mod keys;
@@ -32,16 +32,18 @@ mod wordlist;
 pub use wordlist::EFF_LONG_WORD_LIST;
 mod store;
 pub use store::{
-    dangerous_get_v2_rotated_account_keys, KeyStore, KeyStoreContext, RotatedUserKeys,
+    KeyStore, KeyStoreContext, RotatedUserKeys, dangerous_get_v2_rotated_account_keys,
 };
 mod cose;
+pub(crate) use cose::CONTENT_TYPE_PADDED_CBOR;
 pub use cose::CoseSerializable;
+pub mod safe;
 mod signing;
 pub use signing::*;
 mod traits;
 mod xchacha20;
 pub use traits::{
-    CompositeEncryptable, Decryptable, IdentifyKey, KeyId, KeyIds, PrimitiveEncryptable,
+    CompositeEncryptable, Decryptable, IdentifyKey, KeyId, KeyIds, LocalId, PrimitiveEncryptable,
 };
 pub use zeroizing_alloc::ZeroAlloc as ZeroizingAllocator;
 

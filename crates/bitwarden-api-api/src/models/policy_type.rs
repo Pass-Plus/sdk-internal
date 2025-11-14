@@ -23,7 +23,7 @@ pub enum PolicyType {
     PasswordGenerator = 2,
     SingleOrg = 3,
     RequireSso = 4,
-    PersonalOwnership = 5,
+    OrganizationDataOwnership = 5,
     DisableSend = 6,
     SendOptions = 7,
     ResetPassword = 8,
@@ -33,6 +33,10 @@ pub enum PolicyType {
     AutomaticAppLogIn = 12,
     FreeFamiliesSponsorshipPolicy = 13,
     RemoveUnlockWithPin = 14,
+    RestrictedItemTypesPolicy = 15,
+    UriMatchDefaults = 16,
+    AutotypeDefaultSetting = 17,
+    AutomaticUserConfirmation = 18,
 }
 
 impl std::fmt::Display for PolicyType {
@@ -46,7 +50,7 @@ impl std::fmt::Display for PolicyType {
                 Self::PasswordGenerator => "2",
                 Self::SingleOrg => "3",
                 Self::RequireSso => "4",
-                Self::PersonalOwnership => "5",
+                Self::OrganizationDataOwnership => "5",
                 Self::DisableSend => "6",
                 Self::SendOptions => "7",
                 Self::ResetPassword => "8",
@@ -56,6 +60,10 @@ impl std::fmt::Display for PolicyType {
                 Self::AutomaticAppLogIn => "12",
                 Self::FreeFamiliesSponsorshipPolicy => "13",
                 Self::RemoveUnlockWithPin => "14",
+                Self::RestrictedItemTypesPolicy => "15",
+                Self::UriMatchDefaults => "16",
+                Self::AutotypeDefaultSetting => "17",
+                Self::AutomaticUserConfirmation => "18",
             }
         )
     }

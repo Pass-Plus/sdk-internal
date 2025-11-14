@@ -58,7 +58,8 @@ pub mod tests {
     use std::sync::Arc;
 
     use tokio::sync::{
-        broadcast::{self, Receiver, Sender}, Mutex, RwLock,
+        broadcast::{self, Receiver, Sender},
+        Mutex, RwLock, RwLock,
     };
 
     use super::*;

@@ -1,17 +1,21 @@
-use bitwarden_core::key_management::{KeyIds, SymmetricKeyId};
+use bitwarden_api_api::models::CipherSshKeyModel;
+use bitwarden_core::{
+    key_management::{KeyIds, SymmetricKeyId},
+    require,
+};
 use bitwarden_crypto::{
     CompositeEncryptable, CryptoError, Decryptable, EncString, KeyStoreContext,
     PrimitiveEncryptable,
 };
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "wasm")]
-use tsify_next::Tsify;
+use tsify::Tsify;
 
 use super::cipher::CipherKind;
-use crate::{cipher::cipher::CopyableCipherFields, Cipher};
+use crate::{Cipher, VaultParseError, cipher::cipher::CopyableCipherFields};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[cfg_attr(feature = "wasm", derive(Tsify), tsify(into_wasm_abi, from_wasm_abi))]
 pub struct SshKey {
@@ -76,6 +80,28 @@ impl CipherKind for SshKey {
 
     fn get_copyable_fields(&self, _: Option<&Cipher>) -> Vec<CopyableCipherFields> {
         [CopyableCipherFields::SshKey].into_iter().collect()
+    }
+}
+
+impl TryFrom<CipherSshKeyModel> for SshKey {
+    type Error = VaultParseError;
+
+    fn try_from(ssh_key: CipherSshKeyModel) -> Result<Self, Self::Error> {
+        Ok(Self {
+            private_key: require!(EncString::try_from_optional(ssh_key.private_key)?),
+            public_key: require!(EncString::try_from_optional(ssh_key.public_key)?),
+            fingerprint: require!(EncString::try_from_optional(ssh_key.key_fingerprint)?),
+        })
+    }
+}
+
+impl From<SshKey> for CipherSshKeyModel {
+    fn from(ssh_key: SshKey) -> Self {
+        Self {
+            private_key: Some(ssh_key.private_key.to_string()),
+            public_key: Some(ssh_key.public_key.to_string()),
+            key_fingerprint: Some(ssh_key.fingerprint.to_string()),
+        }
     }
 }
 

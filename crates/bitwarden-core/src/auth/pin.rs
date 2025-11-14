@@ -1,10 +1,10 @@
 use bitwarden_crypto::{EncString, PinKey};
 
 use crate::{
+    Client, NotAuthenticatedError,
     auth::AuthValidateError,
     client::{LoginMethod, UserLoginMethod},
     key_management::SymmetricKeyId,
-    Client, NotAuthenticatedError,
 };
 
 pub(crate) fn validate_pin(
@@ -49,7 +49,7 @@ mod tests {
     use bitwarden_crypto::{Kdf, MasterKey};
 
     use super::*;
-    use crate::client::{Client, LoginMethod, UserLoginMethod};
+    use crate::client::{Client, LoginMethod, UserLoginMethod, internal::UserKeyState};
 
     fn init_client() -> Client {
         let client = Client::new(None);
@@ -78,8 +78,11 @@ mod tests {
             .initialize_user_crypto_master_key(
                 master_key,
                 user_key.parse().unwrap(),
-                private_key,
-                None,
+                UserKeyState {
+                    private_key,
+                    signing_key: None,
+                    security_state: None,
+                },
             )
             .unwrap();
 

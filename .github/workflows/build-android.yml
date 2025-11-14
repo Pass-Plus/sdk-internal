@@ -6,6 +6,11 @@ on:
     branches:
       - "main"
   workflow_dispatch:
+    inputs:
+      update-android-repo:
+        description: "Update Android Repo - Opens a PR updating the SDK in bitwarden/android"
+        type: boolean
+        default: false
 
 defaults:
   run:
@@ -28,10 +33,10 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921 # stable
         with:
           toolchain: stable
 
@@ -59,26 +64,29 @@ jobs:
     name: Combine
     runs-on: ubuntu-24.04
     needs: build
+    outputs:
+      sdk-package-id: ${{ steps.publish.outputs.sdk-package-id }}
+      sdk-version: ${{ steps.publish.outputs.sdk-version }}
     permissions:
       contents: read
       packages: write
 
     steps:
       - name: Checkout repo (PR)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Checkout repo (Push)
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        if: github.event_name == 'push'
+      - name: Checkout repo (Push or manual run)
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
         with:
           fetch-depth: 0
 
       - name: Install rust
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # stable
+        uses: dtolnay/rust-toolchain@6d653acede28d24f02e3cd41383119e8b1b35921 # stable
         with:
           toolchain: stable
 
@@ -88,7 +96,7 @@ jobs:
           key: cargo-combine-cache
 
       - name: Setup Java
-        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
+        uses: actions/setup-java@dded0888837ed1f317902acf8a20df0ad188d165 # v5.0.0
         with:
           distribution: temurin
           java-version: 17
@@ -118,7 +126,53 @@ jobs:
           ./gradlew build --warning-mode all --stacktrace
 
       - name: Publish
+        id: publish
         run: ./gradlew sdk:publish
         working-directory: crates/bitwarden-uniffi/kotlin
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update:
+    name: Trigger SDK update in Android repo
+    runs-on: ubuntu-24.04
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || inputs.update-android-repo
+    needs: combine
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Log in to Azure
+        uses: bitwarden/gh-actions/azure-login@main
+        with:
+          subscription_id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          tenant_id: ${{ secrets.AZURE_TENANT_ID }}
+          client_id: ${{ secrets.AZURE_CLIENT_ID }}
+
+      - name: Get Azure Key Vault secrets
+        id: get-kv-secrets
+        uses: bitwarden/gh-actions/get-keyvault-secrets@main
+        with:
+          keyvault: gh-org-bitwarden
+          secrets: "BW-GHAPP-ID,BW-GHAPP-KEY"
+
+      - name: Log out from Azure
+        uses: bitwarden/gh-actions/azure-logout@main
+
+      - name: Generate GH App token
+        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
+        id: app-token
+        with:
+          app-id: ${{ steps.get-kv-secrets.outputs.BW-GHAPP-ID }}
+          private-key: ${{ steps.get-kv-secrets.outputs.BW-GHAPP-KEY }}
+          owner: bitwarden
+          repositories: android
+          permission-actions: write
+
+      - name: Call SDLC SDK Update workflow in Android repo
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          _SDK_PACKAGE: ${{ needs.combine.outputs.sdk-package-id }}
+          _SDK_VERSION: ${{ needs.combine.outputs.sdk-version }}
+        run: |
+          echo "🚀 Triggering sdlc-sdk-update.yml workflow in bitwarden/android repo..."
+          gh workflow run sdlc-sdk-update.yml --repo bitwarden/android --ref main -f run-mode=Update -f sdk-package=$_SDK_PACKAGE -f sdk-version=$_SDK_VERSION

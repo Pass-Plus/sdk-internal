@@ -1,12 +1,12 @@
 use std::collections::BTreeSet;
 
 use bitwarden_error::bitwarden_error;
-use rand::{distributions::Distribution, seq::SliceRandom, RngCore};
+use rand::{RngCore, distributions::Distribution, seq::SliceRandom};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 #[cfg(feature = "wasm")]
-use tsify_next::Tsify;
+use tsify::Tsify;
 
 #[allow(missing_docs)]
 #[bitwarden_error(flat)]

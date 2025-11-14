@@ -4,20 +4,20 @@ use bitwarden_core::{
     require,
 };
 use bitwarden_crypto::{CompositeEncryptable, CryptoError, Decryptable, KeyStoreContext};
-use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
+use serde::{Deserialize, Deserializer, Serialize};
+use serde_repr::Serialize_repr;
 #[cfg(feature = "wasm")]
-use tsify_next::Tsify;
+use tsify::Tsify;
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::{
-    cipher::cipher::{CipherKind, CopyableCipherFields},
     Cipher, VaultParseError,
+    cipher::cipher::{CipherKind, CopyableCipherFields},
 };
 
 #[allow(missing_docs)]
-#[derive(Clone, Copy, Serialize_repr, Deserialize_repr, Debug)]
+#[derive(Clone, Copy, Serialize_repr, Debug)]
 #[repr(u8)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 #[cfg_attr(feature = "wasm", wasm_bindgen)]
@@ -26,11 +26,29 @@ pub enum SecureNoteType {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[cfg_attr(feature = "wasm", derive(Tsify), tsify(into_wasm_abi, from_wasm_abi))]
 pub struct SecureNote {
     r#type: SecureNoteType,
+}
+
+/// Use the custom deserializer for SecureNoteType
+/// Older notes may have a Type greater than 0. If so set them to Generic
+impl<'de> Deserialize<'de> for SecureNoteType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        match u8::deserialize(deserializer) {
+            Ok(0) => Ok(SecureNoteType::Generic),
+            Ok(_) => {
+                // Any unknown type (like type 1) defaults to Generic
+                Ok(SecureNoteType::Generic)
+            }
+            Err(_) => Ok(SecureNoteType::Generic),
+        }
+    }
 }
 
 #[allow(missing_docs)]
@@ -84,6 +102,22 @@ impl From<bitwarden_api_api::models::SecureNoteType> for SecureNoteType {
     }
 }
 
+impl From<SecureNoteType> for bitwarden_api_api::models::SecureNoteType {
+    fn from(model: SecureNoteType) -> Self {
+        match model {
+            SecureNoteType::Generic => bitwarden_api_api::models::SecureNoteType::Generic,
+        }
+    }
+}
+
+impl From<SecureNote> for CipherSecureNoteModel {
+    fn from(model: SecureNote) -> Self {
+        Self {
+            r#type: Some(model.r#type.into()),
+        }
+    }
+}
+
 impl CipherKind for SecureNote {
     fn get_copyable_fields(&self, cipher: Option<&Cipher>) -> Vec<CopyableCipherFields> {
         [cipher
@@ -106,9 +140,9 @@ impl CipherKind for SecureNote {
 #[cfg(test)]
 mod tests {
     use crate::{
+        CipherRepromptType, CipherType, SecureNoteType,
         cipher::cipher::{Cipher, CipherKind, CopyableCipherFields},
         secure_note::SecureNote,
-        CipherRepromptType, CipherType, SecureNoteType,
     };
 
     fn create_cipher_for_note(note: SecureNote) -> Cipher {
@@ -139,6 +173,8 @@ mod tests {
             creation_date: "2024-01-01T00:00:00.000Z".parse().unwrap(),
             deleted_date: None,
             revision_date: "2024-01-01T00:00:00.000Z".parse().unwrap(),
+            archived_date: None,
+            data: None,
         }
     }
 

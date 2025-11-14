@@ -1,12 +1,12 @@
 use bitwarden_crypto::EFF_LONG_WORD_LIST;
 use bitwarden_error::bitwarden_error;
-use rand::{distributions::Distribution, seq::SliceRandom, Rng, RngCore};
+use rand::{Rng, RngCore, distributions::Distribution, seq::SliceRandom};
 use reqwest::StatusCode;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 #[cfg(feature = "wasm")]
-use tsify_next::Tsify;
+use tsify::Tsify;
 
 use crate::util::capitalize_first_letter;
 
@@ -42,7 +42,7 @@ pub enum AppendType {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "wasm",
-    derive(tsify_next::Tsify),
+    derive(tsify::Tsify),
     tsify(into_wasm_abi, from_wasm_abi)
 )]
 /// Configures the email forwarding service to use.
@@ -81,7 +81,7 @@ pub enum ForwarderServiceType {
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 #[cfg_attr(
     feature = "wasm",
-    derive(tsify_next::Tsify),
+    derive(tsify::Tsify),
     tsify(into_wasm_abi, from_wasm_abi)
 )]
 pub enum UsernameGeneratorRequest {
@@ -120,7 +120,7 @@ pub enum UsernameGeneratorRequest {
 impl ForwarderServiceType {
     /// Generate a username using the specified email forwarding service
     /// This requires an HTTP client to be passed in, as the service will need to make API calls
-    pub async fn generate(
+    async fn generate(
         self,
         http: &reqwest::Client,
         website: Option<String>,
@@ -156,8 +156,8 @@ pub(crate) async fn username(
     input: UsernameGeneratorRequest,
     http: &reqwest::Client,
 ) -> Result<String, UsernameError> {
-    use rand::thread_rng;
     use UsernameGeneratorRequest::*;
+    use rand::thread_rng;
     match input {
         Word {
             capitalize,

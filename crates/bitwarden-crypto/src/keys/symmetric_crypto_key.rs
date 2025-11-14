@@ -1,7 +1,7 @@
 use std::pin::Pin;
 
-use base64::{engine::general_purpose::STANDARD, Engine};
-use coset::{iana::KeyOperation, CborSerializable, RegisteredLabelWithPrivate};
+use bitwarden_encoding::B64;
+use coset::{CborSerializable, RegisteredLabelWithPrivate, iana::KeyOperation};
 use generic_array::GenericArray;
 use rand::Rng;
 #[cfg(test)]
@@ -16,9 +16,9 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use super::{
     key_encryptable::CryptoKey,
-    key_id::{KeyId, KEY_ID_SIZE},
+    key_id::{KEY_ID_SIZE, KeyId},
 };
-use crate::{cose, BitwardenLegacyKeyBytes, ContentFormat, CoseKeyBytes, CryptoError};
+use crate::{BitwardenLegacyKeyBytes, ContentFormat, CoseKeyBytes, CryptoError, cose};
 
 /// [Aes256CbcKey] is a symmetric encryption key, consisting of one 256-bit key,
 /// used to decrypt legacy type 0 enc strings. The data is not authenticated
@@ -71,6 +71,39 @@ impl PartialEq for Aes256CbcHmacKey {
 pub struct XChaCha20Poly1305Key {
     pub(crate) key_id: [u8; KEY_ID_SIZE],
     pub(crate) enc_key: Pin<Box<GenericArray<u8, U32>>>,
+    /// Controls which key operations are allowed with this key. Note: Only checking decrypt is
+    /// implemented right now, and implementing is tracked here <https://bitwarden.atlassian.net/browse/PM-27513>.
+    /// Further, disabling decrypt will also disable unwrap. The only use-case so far is
+    /// `DataEnvelope`.
+    #[zeroize(skip)]
+    pub(crate) supported_operations: Vec<KeyOperation>,
+}
+
+impl XChaCha20Poly1305Key {
+    /// Creates a new XChaCha20Poly1305Key with a securely sampled cryptographic key and key id.
+    pub fn make() -> Self {
+        let mut rng = rand::thread_rng();
+        let mut enc_key = Box::pin(GenericArray::<u8, U32>::default());
+        rng.fill(enc_key.as_mut_slice());
+        let mut key_id = [0u8; KEY_ID_SIZE];
+        rng.fill(&mut key_id);
+
+        Self {
+            enc_key,
+            key_id,
+            supported_operations: vec![
+                KeyOperation::Decrypt,
+                KeyOperation::Encrypt,
+                KeyOperation::WrapKey,
+                KeyOperation::UnwrapKey,
+            ],
+        }
+    }
+
+    pub(crate) fn disable_key_operation(&mut self, op: KeyOperation) -> &mut Self {
+        self.supported_operations.retain(|k| *k != op);
+        self
+    }
 }
 
 impl ConstantTimeEq for XChaCha20Poly1305Key {
@@ -134,6 +167,12 @@ impl SymmetricCryptoKey {
         Self::XChaCha20Poly1305Key(XChaCha20Poly1305Key {
             enc_key,
             key_id: KeyId::make().into(),
+            supported_operations: vec![
+                KeyOperation::Decrypt,
+                KeyOperation::Encrypt,
+                KeyOperation::WrapKey,
+                KeyOperation::UnwrapKey,
+            ],
         })
     }
 
@@ -154,7 +193,7 @@ impl SymmetricCryptoKey {
             }
             EncodedSymmetricKey::CoseKey(_) => {
                 let mut encoded_key: Vec<u8> = encoded_key.into();
-                pad_key(&mut encoded_key, Self::AES256_CBC_HMAC_KEY_LEN + 1);
+                pad_key(&mut encoded_key, (Self::AES256_CBC_HMAC_KEY_LEN + 1) as u8); // This is less than 255
                 BitwardenLegacyKeyBytes::from(encoded_key)
             }
         }
@@ -199,13 +238,11 @@ impl SymmetricCryptoKey {
             }
             Self::XChaCha20Poly1305Key(key) => {
                 let builder = coset::CoseKeyBuilder::new_symmetric_key(key.enc_key.to_vec());
-                let mut cose_key = builder
-                    .key_id(key.key_id.to_vec())
-                    .add_key_op(KeyOperation::Decrypt)
-                    .add_key_op(KeyOperation::Encrypt)
-                    .add_key_op(KeyOperation::WrapKey)
-                    .add_key_op(KeyOperation::UnwrapKey)
-                    .build();
+                let mut cose_key = builder.key_id(key.key_id.to_vec());
+                for op in &key.supported_operations {
+                    cose_key = cose_key.add_key_op(*op);
+                }
+                let mut cose_key = cose_key.build();
                 cose_key.alg = Some(RegisteredLabelWithPrivate::PrivateUse(
                     cose::XCHACHA20_POLY1305,
                 ));
@@ -227,8 +264,8 @@ impl SymmetricCryptoKey {
     }
 
     #[allow(missing_docs)]
-    pub fn to_base64(&self) -> String {
-        STANDARD.encode(self.to_encoded())
+    pub fn to_base64(&self) -> B64 {
+        B64::from(self.to_encoded().as_ref())
     }
 }
 
@@ -261,10 +298,16 @@ impl TryFrom<String> for SymmetricCryptoKey {
     type Error = CryptoError;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let bytes = STANDARD
-            .decode(value)
-            .map_err(|_| CryptoError::InvalidKey)?;
-        Self::try_from(&BitwardenLegacyKeyBytes::from(bytes))
+        let bytes = B64::try_from(value).map_err(|_| CryptoError::InvalidKey)?;
+        Self::try_from(bytes)
+    }
+}
+
+impl TryFrom<B64> for SymmetricCryptoKey {
+    type Error = CryptoError;
+
+    fn try_from(value: B64) -> Result<Self, Self::Error> {
+        Self::try_from(&BitwardenLegacyKeyBytes::from(&value))
     }
 }
 
@@ -278,18 +321,15 @@ impl TryFrom<&BitwardenLegacyKeyBytes> for SymmetricCryptoKey {
         // are the raw serializations of the AES256-CBC, and AES256-CBC-HMAC keys. If they
         // are longer, they are COSE keys. The COSE keys are padded to the minimum length of
         // 65 bytes, when serialized to raw byte arrays.
-        let result = if slice.len() == Self::AES256_CBC_HMAC_KEY_LEN
-            || slice.len() == Self::AES256_CBC_KEY_LEN
-        {
+
+        if slice.len() == Self::AES256_CBC_HMAC_KEY_LEN || slice.len() == Self::AES256_CBC_KEY_LEN {
             Self::try_from(EncodedSymmetricKey::BitwardenLegacyKey(value.clone()))
         } else if slice.len() > Self::AES256_CBC_HMAC_KEY_LEN {
             let unpadded_value = unpad_key(slice)?;
             Ok(Self::try_from_cose(unpadded_value)?)
         } else {
             Err(CryptoError::InvalidKeyLen)
-        };
-
-        result
+        }
     }
 }
 
@@ -373,8 +413,9 @@ impl std::fmt::Debug for XChaCha20Poly1305Key {
 /// padding is used to make sure that the byte representation uniquely separates the keys by
 /// size of the byte array. The previous key types [SymmetricCryptoKey::Aes256CbcHmacKey] and
 /// [SymmetricCryptoKey::Aes256CbcKey] are 64 and 32 bytes long respectively.
-fn pad_key(key_bytes: &mut Vec<u8>, min_length: usize) {
-    crate::keys::utils::pad_bytes(key_bytes, min_length);
+fn pad_key(key_bytes: &mut Vec<u8>, min_length: u8) {
+    crate::keys::utils::pad_bytes(key_bytes, min_length as usize)
+        .expect("Padding cannot fail since the min_length is < 255")
 }
 
 /// Unpad a key that is padded using the PKCS7-like padding defined by [pad_key].
@@ -407,6 +448,7 @@ impl From<EncodedSymmetricKey> for Vec<u8> {
     }
 }
 impl EncodedSymmetricKey {
+    /// Returns the content format of the encoded symmetric key.
     #[allow(private_interfaces)]
     pub fn content_format(&self) -> ContentFormat {
         match self {
@@ -429,14 +471,15 @@ pub fn derive_symmetric_key(name: &str) -> Aes256CbcHmacKey {
 
 #[cfg(test)]
 mod tests {
-    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bitwarden_encoding::B64;
+    use coset::iana::KeyOperation;
     use generic_array::GenericArray;
     use typenum::U32;
 
-    use super::{derive_symmetric_key, SymmetricCryptoKey};
+    use super::{SymmetricCryptoKey, derive_symmetric_key};
     use crate::{
-        keys::symmetric_crypto_key::{pad_key, unpad_key},
         Aes256CbcHmacKey, Aes256CbcKey, BitwardenLegacyKeyBytes, XChaCha20Poly1305Key,
+        keys::symmetric_crypto_key::{pad_key, unpad_key},
     };
 
     #[test]
@@ -448,7 +491,7 @@ mod tests {
 
         let key = "UY4B5N4DA4UisCNClgZtRr6VLy9ZF5BXXC7cDZRqourKi4ghEMgISbCsubvgCkHf5DZctQjVot11/vVvN9NNHQ==".to_string();
         let key2 = SymmetricCryptoKey::try_from(key.clone()).unwrap();
-        assert_eq!(key, key2.to_base64());
+        assert_eq!(key, key2.to_base64().to_string());
     }
 
     #[test]
@@ -461,8 +504,9 @@ mod tests {
 
     #[test]
     fn test_decode_new_symmetric_crypto_key() {
-        let key = STANDARD.decode("pQEEAlDib+JxbqMBlcd3KTUesbufAzoAARFvBIQDBAUGIFggt79surJXmqhPhYuuqi9ZyPfieebmtw2OsmN5SDrb4yUB").unwrap();
-        let key = BitwardenLegacyKeyBytes::from(key);
+        let key: B64 = ("pQEEAlDib+JxbqMBlcd3KTUesbufAzoAARFvBIQDBAUGIFggt79surJXmqhPhYuuqi9ZyPfieebmtw2OsmN5SDrb4yUB").parse()
+        .unwrap();
+        let key = BitwardenLegacyKeyBytes::from(&key);
         let key = SymmetricCryptoKey::try_from(&key).unwrap();
         match key {
             SymmetricCryptoKey::XChaCha20Poly1305Key(_) => (),
@@ -552,6 +596,12 @@ mod tests {
         let key2 = SymmetricCryptoKey::XChaCha20Poly1305Key(XChaCha20Poly1305Key {
             enc_key: Box::pin(GenericArray::<u8, U32>::default()),
             key_id: [0; 16],
+            supported_operations: vec![
+                KeyOperation::Decrypt,
+                KeyOperation::Encrypt,
+                KeyOperation::WrapKey,
+                KeyOperation::UnwrapKey,
+            ],
         });
         assert_ne!(key1, key2);
     }
@@ -614,18 +664,36 @@ mod tests {
                 vec![1u8; 32].as_slice(),
             )),
             key_id: [0; 16],
+            supported_operations: vec![
+                KeyOperation::Decrypt,
+                KeyOperation::Encrypt,
+                KeyOperation::WrapKey,
+                KeyOperation::UnwrapKey,
+            ],
         };
         let key2 = XChaCha20Poly1305Key {
             enc_key: Box::pin(GenericArray::<u8, U32>::clone_from_slice(
                 vec![1u8; 32].as_slice(),
             )),
             key_id: [0; 16],
+            supported_operations: vec![
+                KeyOperation::Decrypt,
+                KeyOperation::Encrypt,
+                KeyOperation::WrapKey,
+                KeyOperation::UnwrapKey,
+            ],
         };
         let key3 = XChaCha20Poly1305Key {
             enc_key: Box::pin(GenericArray::<u8, U32>::clone_from_slice(
                 vec![2u8; 32].as_slice(),
             )),
             key_id: [1; 16],
+            supported_operations: vec![
+                KeyOperation::Decrypt,
+                KeyOperation::Encrypt,
+                KeyOperation::WrapKey,
+                KeyOperation::UnwrapKey,
+            ],
         };
         assert_eq!(key1, key2);
         assert_ne!(key1, key3);
@@ -636,10 +704,22 @@ mod tests {
         let key1 = XChaCha20Poly1305Key {
             enc_key: Box::pin(GenericArray::<u8, U32>::default()),
             key_id: [0; 16],
+            supported_operations: vec![
+                KeyOperation::Decrypt,
+                KeyOperation::Encrypt,
+                KeyOperation::WrapKey,
+                KeyOperation::UnwrapKey,
+            ],
         };
         let key2 = XChaCha20Poly1305Key {
             enc_key: Box::pin(GenericArray::<u8, U32>::default()),
             key_id: [1; 16],
+            supported_operations: vec![
+                KeyOperation::Decrypt,
+                KeyOperation::Encrypt,
+                KeyOperation::WrapKey,
+                KeyOperation::UnwrapKey,
+            ],
         };
         assert_ne!(key1, key2);
 

@@ -7,14 +7,10 @@ mod uniffi_support;
 
 mod cipher;
 pub use cipher::*;
-mod collection;
-pub use collection::{Collection, CollectionView};
-mod collection_client;
-pub use collection_client::CollectionsClient;
+mod cipher_risk;
+pub use cipher_risk::*;
 mod folder;
-pub use folder::{Folder, FolderView};
-mod folder_client;
-pub use folder_client::FoldersClient;
+pub use folder::*;
 mod password_history;
 pub use password_history::{PasswordHistory, PasswordHistoryView};
 mod password_history_client;
@@ -23,15 +19,15 @@ mod domain;
 pub use domain::GlobalDomains;
 mod totp;
 pub use totp::{
-    generate_totp, generate_totp_cipher_view, Totp, TotpAlgorithm, TotpError, TotpResponse,
+    Totp, TotpAlgorithm, TotpError, TotpResponse, generate_totp, generate_totp_cipher_view,
 };
 mod error;
 pub use error::{DecryptError, EncryptError, VaultParseError};
 mod vault_client;
 pub use vault_client::{VaultClient, VaultClientExt};
 
-mod sync;
-pub use sync::{SyncRequest, SyncResponse};
-
+#[allow(missing_docs)]
+pub mod collection_client;
 mod totp_client;
+
 pub use totp_client::TotpClient;

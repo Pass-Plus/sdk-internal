@@ -1,4 +1,4 @@
-use crate::{error::SignatureError, CryptoError};
+use crate::{CryptoError, error::SignatureError};
 
 /// Signing is domain-separated within bitwarden, to prevent cross protocol attacks.
 ///
@@ -12,6 +12,8 @@ pub enum SigningNamespace {
     /// The namespace for
     /// [`SignedPublicKey`](crate::keys::SignedPublicKey).
     SignedPublicKey = 1,
+    /// The namespace for SignedSecurityState
+    SecurityState = 2,
     /// This namespace is only used in tests
     #[cfg(test)]
     ExampleNamespace = -1,
@@ -33,6 +35,7 @@ impl TryFrom<i64> for SigningNamespace {
     fn try_from(value: i64) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(SigningNamespace::SignedPublicKey),
+            2 => Ok(SigningNamespace::SecurityState),
             #[cfg(test)]
             -1 => Ok(SigningNamespace::ExampleNamespace),
             #[cfg(test)]

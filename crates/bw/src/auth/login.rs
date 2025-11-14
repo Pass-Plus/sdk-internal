@@ -1,22 +1,21 @@
 use bitwarden_cli::text_prompt_when_none;
 use bitwarden_core::{
+    Client,
     auth::login::{
         ApiKeyLoginRequest, PasswordLoginRequest, TwoFactorEmailRequest, TwoFactorProvider,
         TwoFactorRequest,
     },
-    Client,
 };
-use bitwarden_vault::{SyncRequest, VaultClientExt};
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::{Result, bail};
 use inquire::{Password, Text};
 use log::{debug, error, info};
+
+use crate::vault::{SyncRequest, sync};
 
 pub(crate) async fn login_password(client: Client, email: Option<String>) -> Result<()> {
     let email = text_prompt_when_none("Email", email)?;
 
     let password = Password::new("Password").without_confirmation().prompt()?;
-
-    let kdf = client.auth().prelogin(email.clone()).await?;
 
     let result = client
         .auth()
@@ -24,14 +23,10 @@ pub(crate) async fn login_password(client: Client, email: Option<String>) -> Res
             email: email.clone(),
             password: password.clone(),
             two_factor: None,
-            kdf: kdf.clone(),
         })
         .await?;
 
-    if result.captcha.is_some() {
-        // TODO: We should build a web captcha solution
-        error!("Captcha required");
-    } else if let Some(two_factor) = result.two_factor {
+    if let Some(two_factor) = result.two_factor {
         error!("{two_factor:?}");
 
         let two_factor = if let Some(tf) = two_factor.authenticator {
@@ -72,7 +67,6 @@ pub(crate) async fn login_password(client: Client, email: Option<String>) -> Res
                 email,
                 password,
                 two_factor,
-                kdf,
             })
             .await?;
 
@@ -81,12 +75,13 @@ pub(crate) async fn login_password(client: Client, email: Option<String>) -> Res
         debug!("{result:?}");
     }
 
-    let res = client
-        .vault()
-        .sync(&SyncRequest {
+    let res = sync(
+        &client,
+        &SyncRequest {
             exclude_subdomains: Some(true),
-        })
-        .await?;
+        },
+    )
+    .await?;
     info!("{res:#?}");
 
     Ok(())

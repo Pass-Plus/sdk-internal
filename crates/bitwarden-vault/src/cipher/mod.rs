@@ -5,6 +5,7 @@ pub(crate) mod card;
 pub(crate) mod cipher;
 pub(crate) mod cipher_client;
 pub(crate) mod cipher_permissions;
+pub(crate) mod cipher_view_type;
 pub(crate) mod field;
 pub(crate) mod identity;
 pub(crate) mod linked_id;
@@ -19,11 +20,12 @@ pub use attachment::{
 pub use attachment_client::{AttachmentsClient, DecryptFileError, EncryptFileError};
 pub use card::{CardBrand, CardListView, CardView};
 pub use cipher::{
-    Cipher, CipherError, CipherListView, CipherListViewType, CipherRepromptType, CipherType,
-    CipherView, DecryptCipherListResult, EncryptionContext,
+    Cipher, CipherError, CipherId, CipherListView, CipherListViewType, CipherRepromptType,
+    CipherType, CipherView, DecryptCipherListResult, EncryptionContext,
 };
 pub use cipher_client::CiphersClient;
-pub use field::FieldView;
+pub use cipher_view_type::CipherViewType;
+pub use field::{FieldType, FieldView};
 pub use identity::IdentityView;
 pub use login::{
     Fido2Credential, Fido2CredentialFullView, Fido2CredentialNewView, Fido2CredentialView, Login,

@@ -2,16 +2,16 @@ use log::debug;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+    DeviceType,
     auth::{
         api::response::IdentityTokenResponse,
         login::{LoginError, TwoFactorProvider, TwoFactorRequest},
     },
     client::ApiConfigurations,
-    DeviceType,
 };
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct PasswordTokenRequest {
+pub(crate) struct PasswordTokenRequest {
     scope: String,
     client_id: String,
     #[serde(rename = "deviceType")]
@@ -35,7 +35,7 @@ pub struct PasswordTokenRequest {
 }
 
 impl PasswordTokenRequest {
-    pub fn new(
+    pub(crate) fn new(
         email: &str,
         password_hash: &str,
         device_type: DeviceType,
@@ -64,6 +64,6 @@ impl PasswordTokenRequest {
         &self,
         configurations: &ApiConfigurations,
     ) -> Result<IdentityTokenResponse, LoginError> {
-        super::send_identity_connect_request(configurations, Some(&self.email), &self).await
+        super::send_identity_connect_request(configurations, &self).await
     }
 }

@@ -1,4 +1,3 @@
-use base64::{engine::general_purpose::STANDARD, Engine};
 use bitwarden_api_api::models::{CipherLoginModel, CipherLoginUriModel};
 use bitwarden_core::{
     key_management::{KeyIds, SymmetricKeyId},
@@ -8,16 +7,17 @@ use bitwarden_crypto::{
     CompositeEncryptable, CryptoError, Decryptable, EncString, KeyStoreContext,
     PrimitiveEncryptable,
 };
+use bitwarden_encoding::B64;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 #[cfg(feature = "wasm")]
-use tsify_next::Tsify;
+use tsify::Tsify;
 #[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::wasm_bindgen;
 
 use super::cipher::CipherKind;
-use crate::{cipher::cipher::CopyableCipherFields, Cipher, VaultParseError};
+use crate::{Cipher, PasswordHistoryView, VaultParseError, cipher::cipher::CopyableCipherFields};
 
 #[allow(missing_docs)]
 #[derive(Clone, Copy, Serialize_repr, Deserialize_repr, Debug, PartialEq)]
@@ -63,28 +63,28 @@ impl LoginUriView {
         let Some(cs) = &self.uri_checksum else {
             return false;
         };
-        let Ok(cs) = STANDARD.decode(cs) else {
+        let Ok(cs) = B64::try_from(cs.as_str()) else {
             return false;
         };
 
         use sha2::Digest;
         let uri_hash = sha2::Sha256::new().chain_update(uri.as_bytes()).finalize();
 
-        uri_hash.as_slice() == cs
+        uri_hash.as_slice() == cs.as_bytes()
     }
 
     pub(crate) fn generate_checksum(&mut self) {
         if let Some(uri) = &self.uri {
             use sha2::Digest;
             let uri_hash = sha2::Sha256::new().chain_update(uri.as_bytes()).finalize();
-            let uri_hash = STANDARD.encode(uri_hash.as_slice());
+            let uri_hash = B64::from(uri_hash.as_slice()).to_string();
             self.uri_checksum = Some(uri_hash);
         }
     }
 }
 
 #[allow(missing_docs)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[cfg_attr(feature = "wasm", derive(Tsify), tsify(into_wasm_abi, from_wasm_abi))]
@@ -114,6 +114,7 @@ pub struct Fido2CredentialListView {
     pub user_handle: Option<String>,
     pub user_name: Option<String>,
     pub user_display_name: Option<String>,
+    pub counter: String,
 }
 
 #[allow(missing_docs)]
@@ -144,6 +145,7 @@ pub struct Fido2CredentialView {
 #[allow(missing_docs)]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[cfg_attr(feature = "wasm", derive(Tsify), tsify(into_wasm_abi, from_wasm_abi))]
 pub struct Fido2CredentialFullView {
     pub credential_id: String,
     pub key_type: String,
@@ -278,7 +280,7 @@ impl Decryptable<KeyIds, SymmetricKeyId, Fido2CredentialFullView> for Fido2Crede
 
 #[allow(missing_docs)]
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[cfg_attr(feature = "wasm", derive(Tsify), tsify(into_wasm_abi, from_wasm_abi))]
 pub struct Login {
@@ -294,7 +296,7 @@ pub struct Login {
 }
 
 #[allow(missing_docs)]
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 #[cfg_attr(feature = "wasm", derive(Tsify), tsify(into_wasm_abi, from_wasm_abi))]
@@ -309,6 +311,60 @@ pub struct LoginView {
 
     // TODO: Remove this once the SDK supports state
     pub fido2_credentials: Option<Vec<Fido2Credential>>,
+}
+
+impl LoginView {
+    /// Generate checksums for all URIs in the login view
+    pub fn generate_checksums(&mut self) {
+        if let Some(uris) = &mut self.uris {
+            for uri in uris {
+                uri.generate_checksum();
+            }
+        }
+    }
+
+    /// Re-encrypts the fido2 credentials with a new key, replacing the old encrypted values.
+    pub fn reencrypt_fido2_credentials(
+        &mut self,
+        ctx: &mut KeyStoreContext<KeyIds>,
+        old_key: SymmetricKeyId,
+        new_key: SymmetricKeyId,
+    ) -> Result<(), CryptoError> {
+        if let Some(creds) = &mut self.fido2_credentials {
+            let decrypted_creds: Vec<Fido2CredentialFullView> = creds.decrypt(ctx, old_key)?;
+            *creds = decrypted_creds.encrypt_composite(ctx, new_key)?;
+        }
+        Ok(())
+    }
+
+    /// Compares this LoginView to the original, and returns any new password history items.
+    pub(crate) fn detect_password_change(
+        &mut self,
+        original: &Option<LoginView>,
+    ) -> Vec<PasswordHistoryView> {
+        let Some(original_login) = original else {
+            return vec![];
+        };
+
+        let original_password = original_login.password.as_deref().unwrap_or("");
+        let current_password = self.password.as_deref().unwrap_or("");
+
+        if original_password.is_empty() {
+            // No original password - set revision date only if adding new password
+            if !current_password.is_empty() {
+                self.password_revision_date = Some(Utc::now());
+            }
+            vec![]
+        } else if original_password == current_password {
+            // Password unchanged - preserve original revision date
+            self.password_revision_date = original_login.password_revision_date;
+            vec![]
+        } else {
+            // Password changed - update revision date and track change
+            self.password_revision_date = Some(Utc::now());
+            vec![PasswordHistoryView::new_password(original_password)]
+        }
+    }
 }
 
 #[allow(missing_docs)]
@@ -477,6 +533,7 @@ impl Decryptable<KeyIds, SymmetricKeyId, Fido2CredentialListView> for Fido2Crede
             user_handle: self.user_handle.decrypt(ctx, key)?,
             user_name: self.user_name.decrypt(ctx, key)?,
             user_display_name: self.user_display_name.decrypt(ctx, key)?,
+            counter: self.counter.decrypt(ctx, key)?,
         })
     }
 }
@@ -559,6 +616,70 @@ impl TryFrom<bitwarden_api_api::models::CipherFido2CredentialModel> for Fido2Cre
     }
 }
 
+impl From<LoginUri> for bitwarden_api_api::models::CipherLoginUriModel {
+    fn from(uri: LoginUri) -> Self {
+        bitwarden_api_api::models::CipherLoginUriModel {
+            uri: uri.uri.map(|u| u.to_string()),
+            uri_checksum: uri.uri_checksum.map(|c| c.to_string()),
+            r#match: uri.r#match.map(|m| m.into()),
+        }
+    }
+}
+
+impl From<UriMatchType> for bitwarden_api_api::models::UriMatchType {
+    fn from(match_type: UriMatchType) -> Self {
+        match match_type {
+            UriMatchType::Domain => bitwarden_api_api::models::UriMatchType::Domain,
+            UriMatchType::Host => bitwarden_api_api::models::UriMatchType::Host,
+            UriMatchType::StartsWith => bitwarden_api_api::models::UriMatchType::StartsWith,
+            UriMatchType::Exact => bitwarden_api_api::models::UriMatchType::Exact,
+            UriMatchType::RegularExpression => {
+                bitwarden_api_api::models::UriMatchType::RegularExpression
+            }
+            UriMatchType::Never => bitwarden_api_api::models::UriMatchType::Never,
+        }
+    }
+}
+
+impl From<Fido2Credential> for bitwarden_api_api::models::CipherFido2CredentialModel {
+    fn from(cred: Fido2Credential) -> Self {
+        bitwarden_api_api::models::CipherFido2CredentialModel {
+            credential_id: Some(cred.credential_id.to_string()),
+            key_type: Some(cred.key_type.to_string()),
+            key_algorithm: Some(cred.key_algorithm.to_string()),
+            key_curve: Some(cred.key_curve.to_string()),
+            key_value: Some(cred.key_value.to_string()),
+            rp_id: Some(cred.rp_id.to_string()),
+            user_handle: cred.user_handle.map(|h| h.to_string()),
+            user_name: cred.user_name.map(|n| n.to_string()),
+            counter: Some(cred.counter.to_string()),
+            rp_name: cred.rp_name.map(|n| n.to_string()),
+            user_display_name: cred.user_display_name.map(|n| n.to_string()),
+            discoverable: Some(cred.discoverable.to_string()),
+            creation_date: cred.creation_date.to_rfc3339(),
+        }
+    }
+}
+
+impl From<Login> for bitwarden_api_api::models::CipherLoginModel {
+    fn from(login: Login) -> Self {
+        bitwarden_api_api::models::CipherLoginModel {
+            uri: None,
+            uris: login
+                .uris
+                .map(|u| u.into_iter().map(|u| u.into()).collect()),
+            username: login.username.map(|u| u.to_string()),
+            password: login.password.map(|p| p.to_string()),
+            password_revision_date: login.password_revision_date.map(|d| d.to_rfc3339()),
+            totp: login.totp.map(|t| t.to_string()),
+            autofill_on_page_load: login.autofill_on_page_load,
+            fido2_credentials: login
+                .fido2_credentials
+                .map(|c| c.into_iter().map(|c| c.into()).collect()),
+        }
+    }
+}
+
 impl CipherKind for Login {
     fn decrypt_subtitle(
         &self,
@@ -589,8 +710,8 @@ impl CipherKind for Login {
 #[cfg(test)]
 mod tests {
     use crate::{
-        cipher::cipher::{CipherKind, CopyableCipherFields},
         Login,
+        cipher::cipher::{CipherKind, CopyableCipherFields},
     };
 
     #[test]

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use bitwarden_core::key_management::{KeyIds, SymmetricKeyId};
+use bitwarden_core::key_management::KeyIds;
 #[allow(deprecated)]
 use bitwarden_crypto::dangerous_derive_kdf_material;
 use bitwarden_crypto::{
@@ -135,18 +135,13 @@ impl PureCrypto {
         let mut context = tmp_store.context();
         let wrapping_key =
             SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(wrapping_key))?;
-        #[allow(deprecated)]
-        context.set_symmetric_key(SymmetricKeyId::Local("wrapping_key"), wrapping_key)?;
+        let wrapping_key = context.add_local_symmetric_key(wrapping_key);
         let key_to_be_wrapped =
             SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(key_to_be_wrapped))?;
-        #[allow(deprecated)]
-        context.set_symmetric_key(SymmetricKeyId::Local("key_to_wrap"), key_to_be_wrapped)?;
+        let key_to_wrap = context.add_local_symmetric_key(key_to_be_wrapped);
         // Note: The order of arguments is different here, and should probably be refactored
         Ok(context
-            .wrap_symmetric_key(
-                SymmetricKeyId::Local("wrapping_key"),
-                SymmetricKeyId::Local("key_to_wrap"),
-            )?
+            .wrap_symmetric_key(wrapping_key, key_to_wrap)?
             .to_string())
     }
 
@@ -160,16 +155,12 @@ impl PureCrypto {
         let mut context = tmp_store.context();
         let wrapping_key =
             SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(wrapping_key))?;
-        #[allow(deprecated)]
-        context.set_symmetric_key(SymmetricKeyId::Local("wrapping_key"), wrapping_key)?;
+        let wrapping_key = context.add_local_symmetric_key(wrapping_key);
         // Note: The order of arguments is different here, and should probably be refactored
-        context.unwrap_symmetric_key(
-            SymmetricKeyId::Local("wrapping_key"),
-            SymmetricKeyId::Local("wrapped_key"),
-            &EncString::from_str(wrapped_key.as_str())?,
-        )?;
+        let unwrapped = context
+            .unwrap_symmetric_key(wrapping_key, &EncString::from_str(wrapped_key.as_str())?)?;
         #[allow(deprecated)]
-        let key = context.dangerous_get_symmetric_key(SymmetricKeyId::Local("wrapped_key"))?;
+        let key = context.dangerous_get_symmetric_key(unwrapped)?;
         Ok(key.to_encoded().to_vec())
     }
 
@@ -184,13 +175,11 @@ impl PureCrypto {
     ) -> Result<String, CryptoError> {
         let tmp_store: KeyStore<KeyIds> = KeyStore::default();
         let mut context = tmp_store.context();
-        #[allow(deprecated)]
-        context.set_symmetric_key(
-            SymmetricKeyId::Local("wrapping_key"),
-            SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(wrapping_key))?,
-        )?;
+        let wrapping_key = context.add_local_symmetric_key(SymmetricCryptoKey::try_from(
+            &BitwardenLegacyKeyBytes::from(wrapping_key),
+        )?);
         Ok(SpkiPublicKeyBytes::from(encapsulation_key)
-            .encrypt(&mut context, SymmetricKeyId::Local("wrapping_key"))?
+            .encrypt(&mut context, wrapping_key)?
             .to_string())
     }
 
@@ -202,13 +191,10 @@ impl PureCrypto {
     ) -> Result<Vec<u8>, CryptoError> {
         let tmp_store: KeyStore<KeyIds> = KeyStore::default();
         let mut context = tmp_store.context();
-        #[allow(deprecated)]
-        context.set_symmetric_key(
-            SymmetricKeyId::Local("wrapping_key"),
-            SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(wrapping_key))?,
-        )?;
-        EncString::from_str(wrapped_key.as_str())?
-            .decrypt(&mut context, SymmetricKeyId::Local("wrapping_key"))
+        let wrapping_key = context.add_local_symmetric_key(SymmetricCryptoKey::try_from(
+            &BitwardenLegacyKeyBytes::from(wrapping_key),
+        )?);
+        EncString::from_str(wrapped_key.as_str())?.decrypt(&mut context, wrapping_key)
     }
 
     /// Wraps (encrypts) a PKCS8 DER encoded decapsulation (private) key using a symmetric wrapping
@@ -219,13 +205,11 @@ impl PureCrypto {
     ) -> Result<String, CryptoError> {
         let tmp_store: KeyStore<KeyIds> = KeyStore::default();
         let mut context = tmp_store.context();
-        #[allow(deprecated)]
-        context.set_symmetric_key(
-            SymmetricKeyId::Local("wrapping_key"),
-            SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(wrapping_key))?,
-        )?;
+        let wrapping_key = context.add_local_symmetric_key(SymmetricCryptoKey::try_from(
+            &BitwardenLegacyKeyBytes::from(wrapping_key),
+        )?);
         Ok(Pkcs8PrivateKeyBytes::from(decapsulation_key)
-            .encrypt(&mut context, SymmetricKeyId::Local("wrapping_key"))?
+            .encrypt(&mut context, wrapping_key)?
             .to_string())
     }
 
@@ -237,13 +221,10 @@ impl PureCrypto {
     ) -> Result<Vec<u8>, CryptoError> {
         let tmp_store: KeyStore<KeyIds> = KeyStore::default();
         let mut context = tmp_store.context();
-        #[allow(deprecated)]
-        context.set_symmetric_key(
-            SymmetricKeyId::Local("wrapping_key"),
-            SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(wrapping_key))?,
-        )?;
-        EncString::from_str(wrapped_key.as_str())?
-            .decrypt(&mut context, SymmetricKeyId::Local("wrapping_key"))
+        let wrapping_key = context.add_local_symmetric_key(SymmetricCryptoKey::try_from(
+            &BitwardenLegacyKeyBytes::from(wrapping_key),
+        )?);
+        EncString::from_str(wrapped_key.as_str())?.decrypt(&mut context, wrapping_key)
     }
 
     /// Encapsulates (encrypts) a symmetric key using an asymmetric encapsulation key (public key)
@@ -253,9 +234,8 @@ impl PureCrypto {
         shared_key: Vec<u8>,
         encapsulation_key: Vec<u8>,
     ) -> Result<String, CryptoError> {
-        let encapsulation_key = AsymmetricPublicCryptoKey::from_der(&SpkiPublicKeyBytes::from(
-            encapsulation_key.as_slice(),
-        ))?;
+        let encapsulation_key =
+            AsymmetricPublicCryptoKey::from_der(&SpkiPublicKeyBytes::from(encapsulation_key))?;
         Ok(UnsignedSharedKey::encapsulate_key_unsigned(
             &SymmetricCryptoKey::try_from(&BitwardenLegacyKeyBytes::from(shared_key))?,
             &encapsulation_key,
@@ -323,6 +303,20 @@ impl PureCrypto {
     ) -> Result<Vec<u8>, CryptoError> {
         #[allow(deprecated)]
         dangerous_derive_kdf_material(password, salt, &kdf)
+    }
+
+    pub fn decrypt_user_key_with_master_key(
+        encrypted_user_key: String,
+        master_key: Vec<u8>,
+    ) -> Result<Vec<u8>, CryptoError> {
+        let master_key = &BitwardenLegacyKeyBytes::from(master_key);
+        let master_key = &SymmetricCryptoKey::try_from(master_key)?;
+        let master_key = MasterKey::try_from(master_key)?;
+        let encrypted_user_key = EncString::from_str(&encrypted_user_key)?;
+        let result = master_key
+            .decrypt_user_key(encrypted_user_key)
+            .map_err(|_| CryptoError::InvalidKey)?;
+        Ok(result.to_encoded().to_vec())
     }
 }
 
@@ -665,5 +659,26 @@ DnqOsltgPomWZ7xVfMkm9niL2OA=
         };
         let derived_key = PureCrypto::derive_kdf_material(password, email, kdf).unwrap();
         assert_eq!(derived_key, DERIVED_KDF_MATERIAL_ARGON2ID);
+    }
+
+    #[test]
+    fn test_decrypt_user_key_with_master_key() {
+        let password = "test_password";
+        let email = "test_email@example.com";
+        let kdf = &Kdf::Argon2id {
+            iterations: NonZero::try_from(3).unwrap(),
+            memory: NonZero::try_from(64).unwrap(),
+            parallelism: NonZero::try_from(4).unwrap(),
+        };
+        let master_key = MasterKey::derive(password, email, kdf).unwrap();
+        let (user_key, encrypted_user_key) = master_key.make_user_key().unwrap();
+        let master_key_bytes = master_key.to_base64().into_bytes();
+
+        let decrypted_user_key = PureCrypto::decrypt_user_key_with_master_key(
+            encrypted_user_key.to_string(),
+            master_key_bytes,
+        )
+        .unwrap();
+        assert_eq!(user_key.0.to_encoded().to_vec(), decrypted_user_key);
     }
 }

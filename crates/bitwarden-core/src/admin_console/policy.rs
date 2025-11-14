@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use uuid::Uuid;
 
-use crate::{require, MissingFieldError};
+use crate::{MissingFieldError, require};
 
 /// Represents a policy that can be applied to an organization.
 #[derive(Serialize, Deserialize, Debug)]
@@ -47,6 +47,10 @@ pub enum PolicyType {
     AutomaticAppLogIn = 12,
     FreeFamiliesSponsorshipPolicy = 13,
     RemoveUnlockWithPin = 14,
+    RestrictedItemTypesPolicy = 15,
+    UriMatchDefaults = 16,
+    AutomaticUserConfirmation = 18,
+    AutotypeDefaultSetting = 17,
 }
 
 impl TryFrom<PolicyResponseModel> for Policy {
@@ -75,7 +79,7 @@ impl From<bitwarden_api_api::models::PolicyType> for PolicyType {
             }
             bitwarden_api_api::models::PolicyType::SingleOrg => PolicyType::SingleOrg,
             bitwarden_api_api::models::PolicyType::RequireSso => PolicyType::RequireSso,
-            bitwarden_api_api::models::PolicyType::PersonalOwnership => {
+            bitwarden_api_api::models::PolicyType::OrganizationDataOwnership => {
                 PolicyType::PersonalOwnership
             }
             bitwarden_api_api::models::PolicyType::DisableSend => PolicyType::DisableSend,
@@ -96,6 +100,16 @@ impl From<bitwarden_api_api::models::PolicyType> for PolicyType {
             }
             bitwarden_api_api::models::PolicyType::RemoveUnlockWithPin => {
                 PolicyType::RemoveUnlockWithPin
+            }
+            bitwarden_api_api::models::PolicyType::RestrictedItemTypesPolicy => {
+                PolicyType::RestrictedItemTypesPolicy
+            }
+            bitwarden_api_api::models::PolicyType::UriMatchDefaults => PolicyType::UriMatchDefaults,
+            bitwarden_api_api::models::PolicyType::AutotypeDefaultSetting => {
+                PolicyType::AutotypeDefaultSetting
+            }
+            bitwarden_api_api::models::PolicyType::AutomaticUserConfirmation => {
+                PolicyType::AutomaticUserConfirmation
             }
         }
     }

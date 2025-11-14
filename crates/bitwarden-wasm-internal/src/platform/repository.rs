@@ -25,11 +25,11 @@
  *   concrete repository we define, but the implementation should be very straightforward.
  * - [WasmRepositoryChannel] struct, which wraps a [WasmRepository] in a [ThreadBoundRunner] and
  *   implements the [Repository] trait. This has a few special considerations:
- *   - It uses [tsify_next::serde_wasm_bindgen] to convert between [JsValue] and our types, so
- *     we can use the existing [Repository] trait.
+ *   - It uses [tsify::serde_wasm_bindgen] to convert between [JsValue] and our types, so we can
+ *     use the existing [Repository] trait.
  *   - It runs the calls in a thread-bound manner, so we can safely call the [WasmRepository]
  *     methods from any thread.
- * - The [create_wasm_repository] macro, defines the [::wasm_bindgen] interface and implements
+ * - The [create_wasm_repositories] macro, defines the [::wasm_bindgen] interface and implements
  *   the [WasmRepository] trait for you.
  */
 
@@ -37,8 +37,8 @@ use std::{future::Future, marker::PhantomData, rc::Rc};
 
 use bitwarden_state::repository::{Repository, RepositoryError, RepositoryItem};
 use bitwarden_threading::ThreadBoundRunner;
-use serde::{de::DeserializeOwned, Serialize};
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use serde::{Serialize, de::DeserializeOwned};
+use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
 /// This trait defines the methods that a [::wasm_bindgen] repository must implement.
 /// The trait itself exists to provide a generic way of handling the [::wasm_bindgen] interface,
@@ -52,7 +52,7 @@ pub(crate) trait WasmRepository<T> {
 
 /// This struct wraps a [WasmRepository] in a [ThreadBoundRunner] to allow it to be used as a
 /// [Repository] in a thread-safe manner. It implements the [Repository] trait directly, by
-/// converting the values as needed with [tsify_next::serde_wasm_bindgen].
+/// converting the values as needed with [tsify::serde_wasm_bindgen].
 pub(crate) struct WasmRepositoryChannel<T, R: WasmRepository<T> + 'static>(
     ThreadBoundRunner<R>,
     PhantomData<T>,
@@ -95,70 +95,106 @@ export interface Repository<T> {
 /// This macro generates a [::wasm_bindgen] interface for a repository type, and provides the
 /// implementation of [WasmRepository] and a way to convert it into something that implements
 /// the [Repository] trait.
-macro_rules! create_wasm_repository {
-    ($name:ident, $ty:ty, $typescript_ty:literal) => {
+macro_rules! create_wasm_repositories {
+    ( $container_name:ident ; $( $qualified_type_name:ty, $type_name:ident, $field_name:ident, $repo_name:ident );+ $(;)? ) => {
+
+        const _: () = {
+            #[wasm_bindgen(typescript_custom_section)]
+            const REPOSITORIES_CUSTOM_TS_TYPE: &'static str = concat!(
+                "export interface ",
+                stringify!($container_name),
+                "{\n",
+                $( stringify!($field_name), ": Repository<", stringify!($type_name), "> | null;\n", )+
+                "}\n"
+            );
+        };
+
         #[wasm_bindgen]
         extern "C" {
-            #[wasm_bindgen(js_name = $name, typescript_type = $typescript_ty)]
-            pub type $name;
+            #[wasm_bindgen(typescript_type = $container_name)]
+            pub type $container_name;
 
-            #[wasm_bindgen(method, catch)]
-            async fn get(
-                this: &$name,
-                id: String,
-            ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue>;
-            #[wasm_bindgen(method, catch)]
-            async fn list(this: &$name)
-                -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue>;
-            #[wasm_bindgen(method, catch)]
-            async fn set(
-                this: &$name,
-                id: String,
-                value: $ty,
-            ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue>;
-            #[wasm_bindgen(method, catch)]
-            async fn remove(
-                this: &$name,
-                id: String,
-            ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue>;
+            $(
+                #[wasm_bindgen(method, getter)]
+                pub fn $field_name(this: &$container_name) -> Option<$repo_name>;
+            )+
         }
 
-        impl $crate::platform::repository::WasmRepository<$ty> for $name {
-            async fn get(
-                &self,
-                id: String,
-            ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue> {
-                self.get(id).await
-            }
-            async fn list(&self) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue> {
-                self.list().await
-            }
-            async fn set(
-                &self,
-                id: String,
-                value: $ty,
-            ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue> {
-                self.set(id, value).await
-            }
-            async fn remove(
-                &self,
-                id: String,
-            ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue> {
-                self.remove(id).await
+        impl $container_name {
+            pub fn register_all(self, client: &bitwarden_core::platform::StateClient) {
+                $(
+                    if let Some(repo) = self.$field_name() {
+                        let repo = repo.into_channel_impl();
+                        client.register_client_managed(repo);
+                    }
+                )+
             }
         }
 
-        impl $name {
-            pub fn into_channel_impl(
-                self,
-            ) -> ::std::sync::Arc<impl bitwarden_state::repository::Repository<$ty>> {
-                use $crate::platform::repository::WasmRepositoryChannel;
-                ::std::sync::Arc::new(WasmRepositoryChannel::new(self))
+        $(
+            #[wasm_bindgen]
+            extern "C" {
+                #[wasm_bindgen]
+                pub type $repo_name;
+
+                #[wasm_bindgen(method, catch)]
+                async fn get(
+                    this: &$repo_name,
+                    id: String,
+                ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue>;
+                #[wasm_bindgen(method, catch)]
+                async fn list(this: &$repo_name)
+                    -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue>;
+                #[wasm_bindgen(method, catch)]
+                async fn set(
+                    this: &$repo_name,
+                    id: String,
+                    value: $qualified_type_name,
+                ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue>;
+                #[wasm_bindgen(method, catch)]
+                async fn remove(
+                    this: &$repo_name,
+                    id: String,
+                ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue>;
             }
-        }
+
+            impl $crate::platform::repository::WasmRepository<$qualified_type_name> for $repo_name {
+                async fn get(
+                    &self,
+                    id: String,
+                ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue> {
+                    self.get(id).await
+                }
+                async fn list(&self) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue> {
+                    self.list().await
+                }
+                async fn set(
+                    &self,
+                    id: String,
+                    value: $qualified_type_name,
+                ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue> {
+                    self.set(id, value).await
+                }
+                async fn remove(
+                    &self,
+                    id: String,
+                ) -> Result<::wasm_bindgen::JsValue, ::wasm_bindgen::JsValue> {
+                    self.remove(id).await
+                }
+            }
+
+            impl $repo_name {
+                pub fn into_channel_impl(
+                    self,
+                ) -> ::std::sync::Arc<impl bitwarden_state::repository::Repository<$qualified_type_name>> {
+                    use $crate::platform::repository::WasmRepositoryChannel;
+                    ::std::sync::Arc::new(WasmRepositoryChannel::new(self))
+                }
+            }
+        )+
     };
 }
-pub(crate) use create_wasm_repository;
+pub(crate) use create_wasm_repositories;
 
 const UNIT: Result<JsValue, JsValue> = Ok(JsValue::UNDEFINED);
 
@@ -180,14 +216,14 @@ where
 }
 
 /// Converts a [Result<JsValue, JsValue>] to a typed [Result<T, RepositoryError>] using
-/// [tsify_next::serde_wasm_bindgen]
+/// [tsify::serde_wasm_bindgen]
 fn convert_result<T: serde::de::DeserializeOwned>(
     result: Result<JsValue, JsValue>,
 ) -> Result<T, RepositoryError> {
     result
         .map_err(|e| RepositoryError::Internal(format!("{e:?}")))
         .and_then(|value| {
-            ::tsify_next::serde_wasm_bindgen::from_value(value)
+            ::tsify::serde_wasm_bindgen::from_value(value)
                 .map_err(|e| RepositoryError::Internal(e.to_string()))
         })
 }
