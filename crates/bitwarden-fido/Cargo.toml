@@ -26,7 +26,6 @@ bitwarden-vault = { workspace = true }
 chrono = { workspace = true }
 coset = ">=0.3.7, <0.4"
 itertools = ">=0.13.0, <0.15"
-log = { workspace = true }
 p256 = ">=0.13.2, <0.14"
 # FOR OFFLINE BUILD: Update path to point to local fork
 # Clone bitwarden/passkey-rs to ../passkey-rs (or update path below)
@@ -39,6 +38,7 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 uniffi = { workspace = true, optional = true }
 uuid = { workspace = true }
 
