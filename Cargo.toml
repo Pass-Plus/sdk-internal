@@ -92,9 +92,17 @@ zxcvbn = ">=3.0.1, <4.0"
 # There is an incompatibility when using pkcs5 and chacha20 on wasm builds. This can be removed once a new
 # rustcrypto-formats crate version is released since the fix has been upstreamed.
 # https://github.com/RustCrypto/formats/pull/1625
+#
+# FOR OFFLINE BUILD: Update paths to point to local forks
+# Clone bitwarden/rustcrypto-formats to ../rustcrypto-formats (or update path below)
+# Clone mozilla/uniffi-rs to ../uniffi-rs (or update path below)
 [patch.crates-io]
+# Local path: Update this path to point to your local rustcrypto-formats repository
+# Example: pkcs5 = { path = "../rustcrypto-formats" }
 pkcs5 = { git = "https://github.com/bitwarden/rustcrypto-formats.git", rev = "2b27c63034217dd126bbf5ed874da51b84f8c705" }
 
+# Local path: Update these paths to point to your local uniffi-rs repository
+# Example: uniffi = { path = "../uniffi-rs/uniffi" }
 uniffi = { git = "https://github.com/mozilla/uniffi-rs", rev = "6d46b3f756dde3213357c477d86771a0fc5da7b4" }
 uniffi_core = { git = "https://github.com/mozilla/uniffi-rs", rev = "6d46b3f756dde3213357c477d86771a0fc5da7b4" }
 uniffi_macros = { git = "https://github.com/mozilla/uniffi-rs", rev = "6d46b3f756dde3213357c477d86771a0fc5da7b4" }

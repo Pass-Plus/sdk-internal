@@ -28,6 +28,9 @@ coset = ">=0.3.7, <0.4"
 itertools = ">=0.13.0, <0.15"
 log = { workspace = true }
 p256 = ">=0.13.2, <0.14"
+# FOR OFFLINE BUILD: Update path to point to local fork
+# Clone bitwarden/passkey-rs to ../passkey-rs (or update path below)
+# Example: passkey = { path = "../passkey-rs/passkey" }
 passkey = { git = "https://github.com/bitwarden/passkey-rs", rev = "3b764633ebc6576c07bdd12ee14d8e5c87b494ed" }
 passkey-client = { git = "https://github.com/bitwarden/passkey-rs", rev = "3b764633ebc6576c07bdd12ee14d8e5c87b494ed", features = [
     "android-asset-validation",
